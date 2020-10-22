@@ -1,2 +1,5 @@
-node_nodules
-package_lock.json
+/node_modules
+package-lock.json
+/.vscode
+/dist
+config.ts
