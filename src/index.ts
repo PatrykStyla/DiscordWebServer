@@ -166,12 +166,20 @@ app.get('/login', async (req, res) => {
 	console.log('/login')	
 })
 
+app.get('/api/:guild_id/users', async (req, res) => {
+	if (!(req as any).user_id) {
+		return res.json(null);
+	}
+
+	const GuildUsers = await database.getGuildUsers(req.params.guild_id!)
+
+	res.json(GuildUsers);
+})
 
 app.get('/api/users/@me', async (req, res) => {
 	if (!(req as any).user_id) {
 		return res.json(null);
 	}
-
 	// Check Disocrd Token
 	// TODO: Cache
 	const User = await database.GetUserDetails((req as any).user_id)

@@ -1,4 +1,4 @@
-import { Pool, createPool, createConnection, Connection, MysqlError } from "mysql";
+ import { Pool, createPool, createConnection, Connection, MysqlError } from "mysql";
 import { DiscordGuildUser, DiscordResponse, DiscordUser } from ".";
 import { username, password, host } from "../config";
 
@@ -121,12 +121,29 @@ INSERT IGNORE INTO WEB__users (user_id, access_token, refresh_token, scope, expi
 	}
 
 	public async GetChannelMessages(channel_id: string) {
-		let sql = `SELECT * FROM (SELECT * FROM channel_messages WHERE channel_id = '${channel_id}' ORDER BY id DESC LIMIT 10) sub ORDER BY id ASC	`;
+		let sql = `SELECT * FROM ( SELECT channel_messages.*, guild_user.nickname, users.username FROM channel_messages, guild_user, users WHERE channel_messages.channel_id = '${channel_id}' AND channel_messages.author = guild_user.user_id AND channel_messages.author = users.id ORDER BY id DESC LIMIT 400 ) sub ORDER BY id ASC`;
 
 		return (await this.GetQuery<ChannelMessage>(sql));
 	}
+
+	public async getGuildUsers(guild_id: string){
+		const sql = `SELECT	guild_user.nickname,guild_user.display_hex_color,users.*,user_to_guild.permissions FROM	user_to_guild,guild_user,users WHERE user_to_guild.guild_id = '${guild_id}' AND guild_user.user_id = user_to_guild.user_id AND users.id = guild_user.user_id`
+
+		return await this.GetQuery<GuildUsers>(sql);
+	}
 }
 
+
+interface GuildUsers {
+	nickname: string,
+	display_hex_color: string,
+	id: string,
+	username: string,
+	discriminator: number,
+	avatar: string
+	bot: boolean,
+	permissions: number
+}
 interface ChannelMessage {
 	id: string,
 	content: string,
