@@ -4,7 +4,7 @@ import url, { URLSearchParams } from 'url';
 import fetch from 'node-fetch';
 import cookieParser from "cookie-parser";
 import bodyParser from 'body-parser';
-
+import nacl from "tweetnacl";
 import { ACCESS_SECRET, CLIENT_SECRET, REFRESH_SECRET } from "../config";
 import { verify } from "jsonwebtoken";
 import { createTokens, GetDiscordToken, RefreshDiscordToken as RefreshDiscordToken } from "./auth";
@@ -13,7 +13,11 @@ import { createTokens, GetDiscordToken, RefreshDiscordToken as RefreshDiscordTok
 import { DB } from "./DB";
 var app = express();
 app.use(cookieParser())
-app.use(express.json())
+app.use(bodyParser.json({
+	verify: (req, res, buf) => {
+	  (req as any).rawBody = buf
+	}
+  }))
 
 var httpServer = http.createServer(app);
 
@@ -30,21 +34,23 @@ const database = new DB()
 const DiscordTokenMap = new Map<string, DiscordResponse>()
 const DisocrdUserMap = new Map<string, DiscordUser>()
 
-// app.use('/', express.static("/home/tulipan/DiscordWeb/", {maxAge: 86400000 * 30}))
-app.use('/favicon.ico/', express.static("/home/tulipan/DiscordWeb/dist/favicon.ico", {maxAge: 86400000 * 30}))
-app.use('/dist', express.static("/home/tulipan/DiscordWeb/dist", {maxAge: 86400000 * 30}))
-
+// app.use('/', express.static("/home/ubuntu/DiscordWeb/", {maxAge: 86400000 * 30}))
+app.use('/favicon.ico/', express.static("/home/ubuntu/DiscordWeb/dist/favicon.ico", { maxAge: 86400000 * 30 }))
+app.use('/dist', express.static("/home/ubuntu/DiscordWeb/dist", { maxAge: 86400000 * 30 }))
 // Gets called on every request to express 
 app.use(async (req, res, next) => {
+	if(req.url === "/interactions") {
+		// Don't verify anything if is interaction
+		next()
+	}
 	const accessToken = (req.cookies as WebCookies)["access_token"];
 	const refreshToken = (req.cookies as WebCookies)["refresh_token"];
-	let tokenData 
+	let tokenData
 	let tokens: {
 		RefreshToken: string;
 		AccessToken: string;
 	} | null = null
 	const now = Date.now()
-
 	if (!refreshToken && !accessToken) {
 		return next()
 	}
@@ -60,8 +66,8 @@ app.use(async (req, res, next) => {
 				tokenData = verify(refreshToken, REFRESH_SECRET) as JWTTokens
 			} catch (error) {
 				return next();
-			} 
-		} else { 
+			}
+		} else {
 			// No refresh or access
 			return next()
 		}
@@ -100,9 +106,9 @@ app.use(async (req, res, next) => {
 	}
 
 	// 30 days
-	res.cookie('refresh_token', tokens.RefreshToken, refresh.COOKIE_REFRESH)
+	res.cookie('refresh_token', tokens.RefreshToken, { maxAge: refresh.COOKIE_REFRESH.maxAge, path: '/' })
 	// 15 min
-	res.cookie('access_token', tokens.AccessToken, refresh.COOKIE_ACCESS)
+	res.cookie('access_token', tokens.AccessToken, { maxAge: refresh.COOKIE_ACCESS.maxAge, path: '/' })
 
 	return next();
 })
@@ -128,7 +134,7 @@ app.get('/api/discord-login', async function (req, res) {
 				authorization: `${DiscordResponse.token_type} ${DiscordResponse.access_token}`,
 			}
 		})
-		
+
 
 		const DiscordDetails = await User.json() as DiscordUser
 		const DiscordUserGuildDetails = await UserGuilds.json() as DiscordGuildUser[]
@@ -137,15 +143,15 @@ app.get('/api/discord-login', async function (req, res) {
 		// console.log(DiscordUserGuildDetails)
 
 		await database.AddDiscordAuthAndData(DiscordDetails, DiscordResponse, DiscordUserGuildDetails);
-		
-		const {RefreshToken, AccessToken} = createTokens(DiscordDetails.id, DiscordResponse.expires_in, Date.now(), DiscordResponse.refresh_token)
+
+		const { RefreshToken, AccessToken } = createTokens(DiscordDetails.id, DiscordResponse.expires_in, Date.now(), DiscordResponse.refresh_token)
 
 		// 30 days
-		res.cookie('refresh_token', RefreshToken, refresh.COOKIE_REFRESH)
+		res.cookie('refresh_token', RefreshToken, { maxAge: refresh.COOKIE_REFRESH.maxAge, path: '/' })
 		// 15 min
-		res.cookie('access_token', AccessToken, refresh.COOKIE_ACCESS)
+		res.cookie('access_token', AccessToken, { maxAge: refresh.COOKIE_ACCESS.maxAge, path: '/' })
 
-		return res.sendFile('/home/tulipan/DiscordWeb/callback.html');
+		return res.sendFile('/home/ubuntu/DiscordWeb/callback.html');
 		// res.send(JSON.stringify([{ body: req.body }, { header: req.headers }]))
 	} else {
 		return res.send(JSON.stringify({ error: "no token provided" }))
@@ -158,12 +164,12 @@ app.get('/api/discord-login', async function (req, res) {
 // 	res.redirect("/")
 // })
 
-app.get('/',  (req, res) => {
+app.get('/', (req, res) => {
 	console.log('/')
-	res.sendFile('/home/tulipan/DiscordWeb/index.html');
+	res.sendFile('/home/ubuntu/DiscordWeb/index.html');
 })
 app.get('/login', async (req, res) => {
-	console.log('/login')	
+	console.log('/login')
 })
 
 app.get('/api/:guild_id/users', async (req, res) => {
@@ -190,20 +196,20 @@ app.get('/api/users/@me', async (req, res) => {
 		const DiscordResponse = await RefreshDiscordToken(User[1] as any)
 		database.AddDiscordAuth((req as any).user_id, DiscordResponse);
 
-		const {RefreshToken, AccessToken} = createTokens((req as any).user_id, DiscordResponse.expires_in, Date.now(), DiscordResponse.refresh_token)
+		const { RefreshToken, AccessToken } = createTokens((req as any).user_id, DiscordResponse.expires_in, Date.now(), DiscordResponse.refresh_token)
 
 		// 30 days
-		res.cookie('refresh_token', RefreshToken, refresh.COOKIE_REFRESH)
+		res.cookie('refresh_token', RefreshToken, { maxAge: refresh.COOKIE_REFRESH.maxAge, path: '/' })
 		// 15 min
-		res.cookie('access_token', AccessToken, refresh.COOKIE_ACCESS)
+		res.cookie('access_token', AccessToken, { maxAge: refresh.COOKIE_ACCESS.maxAge, path: '/' })
 	}
 
-	res.json(User[0])	 
+	res.json(User[0])
 })
 
 app.post('/api/guilds/@channels', jsonParser, async (req, res) => {
 	if (!(req as any).user_id) {
-		return res.json({Nope: "nope"});
+		return res.json({ Nope: "nope" });
 	}
 	const guild_id = req.body.channel_id as string
 
@@ -218,13 +224,55 @@ app.get('/api/channels/:channel_id/messages', async (req, res) => {
 	res.json(Messages)
 })
 
+app.get('/interactions', async function (req, res) {
+	console.log('GET interactions')
+
+	return;
+})
+
+app.post('/interactions', async function (req, res) {
+	console.log('POST interactions')
+	const PUBLIC_KEY = '04458190ee3ca7879627465b97ae4527d627a31f83de1635881bf71aa1a63a0e';
+
+	const signature = req.get('X-Signature-Ed25519')!;
+	const timestamp = req.get('X-Signature-Timestamp')!;
+	const body = (req as any).rawBody as Buffer// rawBody is expected to be a string, not raw bytes
+	const isVerified = nacl.sign.detached.verify(
+		Buffer.from(timestamp + body),
+		Buffer.from(signature, 'hex'),
+		Buffer.from(PUBLIC_KEY, 'hex')
+	);
+
+	if (!isVerified) {
+		// Send 401 on FAIL
+		// MUST BE PRESENT. DISCORD WILL SEND INVALID SIGNATUES
+		return res.status(401).end('invalid request signature');
+	} else {
+		// Send a "pong" on success
+		if (req.body.type === 1) {
+			// PING -> PONG
+			res.end(JSON.stringify({type: 1}))
+		} else {
+			// TODO: Handle all types
+			console.log(JSON.stringify(req.body))
+			return res.json({
+				"type": 4,
+				"data": {
+					"tts": false,
+					"content": "https://discord.patrykstyla.com"
+				}
+			})
+		}
+	}
+})
+
 // ALWAYS LAST
 app.get('*', async function (req, res) {
 	// if (!(req as any).token) {
 	// 	return res.redirect("/login")
 	// }
 	//
-	res.sendFile('/home/tulipan/DiscordWeb/index.html');
+	res.sendFile('/home/ubuntu/DiscordWeb/index.html');
 	console.log('Wildcard')
 })
 
@@ -274,5 +322,5 @@ export interface JWTTokens {
 	now: number
 	exp: number,
 	refresh_token: string
-	  
+
 }
