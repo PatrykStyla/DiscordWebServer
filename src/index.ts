@@ -22,9 +22,9 @@ app.use(bodyParser.json({
 var httpServer = http.createServer(app);
 
 const refresh = {
-	// 30 days
-	COOKIE_ACCESS: { maxAge: 60 * 15 * 1000 },
 	// 15 min
+	COOKIE_ACCESS: { maxAge: 60 * 15 * 1000 },
+	// 30 days
 	COOKIE_REFRESH: { maxAge: 60 * 60 * 24 * 30 * 1000 }
 }
 var jsonParser = bodyParser.json()
@@ -35,10 +35,11 @@ const DiscordTokenMap = new Map<string, DiscordResponse>()
 const DisocrdUserMap = new Map<string, DiscordUser>()
 
 // app.use('/', express.static("/home/ubuntu/DiscordWeb/", {maxAge: 86400000 * 30}))
-app.use('/favicon.ico/', express.static("/home/ubuntu/DiscordWeb/dist/favicon.ico", { maxAge: 86400000 * 30 }))
-app.use('/dist', express.static("/home/ubuntu/DiscordWeb/dist", { maxAge: 86400000 * 30 }))
+// app.use('/favicon.ico/', express.static("/home/ubuntu/DiscordWeb/dist/favicon.ico", { maxAge: 86400000 * 30 }))
+// app.use('/dist', express.static("/home/ubuntu/DiscordWeb/dist", { maxAge: 86400000 * 30 }))
 // Gets called on every request to express 
 app.use(async (req, res, next) => {
+	console.log(req.path)
 	if(req.url === "/interactions") {
 		// Don't verify anything if is interaction
 		next()
@@ -115,7 +116,7 @@ app.use(async (req, res, next) => {
 
 app.get('/api/discord-login', async function (req, res) {
 	const urlObj = url.parse(req.url, true);
-
+	console.log(urlObj)
 	if (urlObj.query.code) {
 		const accessCode = urlObj.query.code;
 		// Data for discord auth
@@ -164,13 +165,10 @@ app.get('/api/discord-login', async function (req, res) {
 // 	res.redirect("/")
 // })
 
-app.get('/', (req, res) => {
-	console.log('/')
-	res.sendFile('/home/ubuntu/DiscordWeb/index.html');
-})
-app.get('/login', async (req, res) => {
-	console.log('/login')
-})
+// app.get('/', (req, res) => {
+// 	console.log('/')
+// 	res.sendFile('/home/ubuntu/DiscordWeb/index.html');
+// })
 
 app.get('/api/:guild_id/users', async (req, res) => {
 	if (!(req as any).user_id) {
