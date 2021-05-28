@@ -42,33 +42,12 @@ export class DB {
 	}
 	public async GetUserDetails(user_id: string){
 		let sql = `SELECT * FROM WEB__users WHERE user_id = '${user_id}'`
-		const now = Date.now()
-		let refreshToken: string | null = null;
 
 		let result = await this.GetQuery<WebsiteUser>(sql);
 
-		if (!result[0]) {
+		if (!result) {
 			// No result in DB Get some
-			return [null, refreshToken];
-		}
-		
-		if (now < Date.parse(result[0].time_added) + (result[0].expires_in * 1000)) {
-			console.log('Valid')
-			// Disocrd token is still valid
-			// Check if Discord token is older than 6 days	
-
-			if (now > Date.parse(result[0].time_added) + (result[0].expires_in * 1000) - 86400000) {
-				// Refresh Discord token
-				console.log('Refresh 6 days old')
-				refreshToken = result[0].refresh_token
-			} else {
-				// proceed with current token
-				console.log('Proceed')
-			}
-		} else {
-			// Discord token has expired. Refresh it
-			refreshToken = result[0].refresh_token
-			console.log('Refresh expired')
+			return null;
 		}
 
 		// TODO QUERY DISCORD API AT LEAST FOR GUILDS
@@ -76,7 +55,7 @@ export class DB {
 		sql = `SELECT guild_id, name, permissions, icon FROM guilds LEFT JOIN user_to_guild ON guild_id = id WHERE bot_active = '1' AND user_id = '${result[0].user_id}'`
 		const User = await this.GetQuery<{guild_id: string, permissions: number, name: string, icon: string}>(sql);
 
-		return [User, refreshToken];	
+		return User;	
 	}
 
 	public async HandleDiscordToken() {
@@ -107,7 +86,7 @@ INSERT IGNORE INTO WEB__users (user_id, access_token, refresh_token, scope, expi
 		await this.GetQuery(sql);
 	}
 
-	public async AddDiscordAuth(User: string, DiscordDetails: DiscordResponse) {
+	public async UpdateDiscordAuth(DiscordDetails: DiscordResponse) {
 		const sql = `INSERT IGNORE INTO WEB__users (access_token, refresh_token, scope, expires_in, token_type) VALUES ('${DiscordDetails.access_token}', '${DiscordDetails.refresh_token}', '${DiscordDetails.scope}', '${DiscordDetails.expires_in}', '${DiscordDetails.token_type}') ON DUPLICATE KEY UPDATE access_token = VALUES(access_token), refresh_token = VALUES(refresh_token), scope = VALUES(scope); `
 	
 		await this.GetQuery(sql);
@@ -130,6 +109,12 @@ INSERT IGNORE INTO WEB__users (user_id, access_token, refresh_token, scope, expi
 		const sql = `SELECT	guild_user.nickname,guild_user.display_hex_color,users.*,user_to_guild.permissions FROM	user_to_guild,guild_user,users WHERE user_to_guild.guild_id = '${guild_id}' AND guild_user.user_id = user_to_guild.user_id AND users.id = guild_user.user_id`
 
 		return await this.GetQuery<GuildUsers>(sql);
+	}
+
+	public async UpdateUserBossMusic(user_id: string, fileName: string) {
+		const sql = `UPDATE guild_user_boss_music SET song_name = '${fileName}.ogg' WHERE user_id = '${user_id}';`;
+
+		await this.GetQuery(sql);
 	}
 }
 

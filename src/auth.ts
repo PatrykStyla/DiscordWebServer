@@ -3,11 +3,18 @@ import { DiscordUser, DiscordResponse, DiscordGuildUser } from ".";
 import { ACCESS_SECRET, CLIENT_SECRET, REFRESH_SECRET } from "../config";
 import fetch from 'node-fetch';
 export const createTokens = (id: string, expires_in: number, now: number, refresh_token: string) => {
+	console.log("2 tokens Created")
 	const AccessToken = sign({ user_id: id, expires_in: expires_in, now: now, refresh_token: refresh_token }, ACCESS_SECRET, { expiresIn: '15min' });
 
 	const RefreshToken = sign({ user_id: id, expires_in: expires_in, now: now, refresh_token: refresh_token }, REFRESH_SECRET, { expiresIn: '30d' });
 
 	return { RefreshToken, AccessToken };
+}
+export const createAccessToken = (id: string, expires_in: number, now: number, refresh_token: string) => {
+	console.log("token created")
+	const AccessToken = sign({ user_id: id, expires_in: expires_in, now: now, refresh_token: refresh_token }, ACCESS_SECRET, { expiresIn: '5sec' });
+
+	return AccessToken;
 }
 
 

@@ -1,13 +1,20 @@
 import http from "http";
 import express from "express";
 import url, { URLSearchParams } from 'url';
+import { URL } from 'url'
 import fetch from 'node-fetch';
 import cookieParser from "cookie-parser";
 import bodyParser from 'body-parser';
 import nacl from "tweetnacl";
 import { ACCESS_SECRET, CLIENT_SECRET, REFRESH_SECRET } from "../config";
 import { verify } from "jsonwebtoken";
-import { createTokens, GetDiscordToken, RefreshDiscordToken as RefreshDiscordToken } from "./auth";
+import { createAccessToken, createTokens, GetDiscordToken, RefreshDiscordToken } from "./auth";
+import fs from "fs";
+import FfmpegCommand from 'fluent-ffmpeg'
+import ydtl from "ytdl-core";
+import { WebSocket, SendMessageToWebSocket } from "/home/ubuntu/DiscordWebServer/WebSocketClient";
+
+const BossMusicFilePath = "/home/ubuntu/DiscordBotJS/audioClips/"
 
 
 import { DB } from "./DB";
@@ -22,6 +29,7 @@ app.use(bodyParser.json({
 var httpServer = http.createServer(app);
 
 const refresh = {
+	// time must be in miliseconds
 	// 15 min
 	COOKIE_ACCESS: { maxAge: 60 * 15 * 1000 },
 	// 30 days
@@ -40,11 +48,11 @@ const DisocrdUserMap = new Map<string, DiscordUser>()
 // Gets called on every request to express 
 app.use(async (req, res, next) => {
 	console.log(req.path)
-	if(req.url === "/interactions") {
+	if(req.url === "/api/interactions") {
 		// Don't verify anything if is interaction
 		next()
 	}
-	const accessToken = (req.cookies as WebCookies)["access_token"];
+	let accessToken = (req.cookies as WebCookies)["access_token"];
 	const refreshToken = (req.cookies as WebCookies)["refresh_token"];
 	let tokenData
 	let tokens: {
@@ -65,6 +73,8 @@ app.use(async (req, res, next) => {
 			try {
 				// check if refresh token is valid
 				tokenData = verify(refreshToken, REFRESH_SECRET) as JWTTokens
+				accessToken = createAccessToken(tokenData.user_id, tokenData.expires_in, now, tokenData.refresh_token);
+				(req as any).user_id = tokenData.user_id;
 			} catch (error) {
 				return next();
 			}
@@ -88,15 +98,16 @@ app.use(async (req, res, next) => {
 	// handle the Discord token
 	if (now < tokenData.now + (tokenData.expires_in * 1000)) {
 		// Disocrd token is still valid
-		// Check if Discord token is older than 6 days
+		// Check if Discord token is older than 6 days			1 day in miliseconds
 		if (now > (tokenData.now + (tokenData.expires_in * 1000) - 86400000)) {
 			console.log('Refresh token 6 days old')
 			// Refresh Discord token
 			const DiscordResponse = await RefreshDiscordToken(tokenData.refresh_token)
 			tokens = createTokens(tokenData.user_id, DiscordResponse.expires_in, now, DiscordResponse.refresh_token)
+			database.UpdateDiscordAuth(DiscordResponse)
 		} else {
 			// procceesd with current token
-			tokens = createTokens(tokenData.user_id, tokenData.expires_in, tokenData.now, tokenData.refresh_token)
+			tokens ={ AccessToken: accessToken, RefreshToken: refreshToken}
 		}
 	} else {
 		console.log('Token expired')
@@ -104,6 +115,7 @@ app.use(async (req, res, next) => {
 		const DiscordResponse = await RefreshDiscordToken(tokenData.refresh_token)
 		// User ID won't change
 		tokens = createTokens(tokenData.user_id, DiscordResponse.expires_in, now, DiscordResponse.refresh_token)
+		database.UpdateDiscordAuth(DiscordResponse)
 	}
 
 	// 30 days
@@ -111,12 +123,11 @@ app.use(async (req, res, next) => {
 	// 15 min
 	res.cookie('access_token', tokens.AccessToken, { maxAge: refresh.COOKIE_ACCESS.maxAge, path: '/' })
 
-	return next();
+	next();
 })
 
 app.get('/api/discord-login', async function (req, res) {
 	const urlObj = url.parse(req.url, true);
-	console.log(urlObj)
 	if (urlObj.query.code) {
 		const accessCode = urlObj.query.code;
 		// Data for discord auth
@@ -147,10 +158,10 @@ app.get('/api/discord-login', async function (req, res) {
 
 		const { RefreshToken, AccessToken } = createTokens(DiscordDetails.id, DiscordResponse.expires_in, Date.now(), DiscordResponse.refresh_token)
 
-		// 30 days
-		res.cookie('refresh_token', RefreshToken, { maxAge: refresh.COOKIE_REFRESH.maxAge, path: '/' })
+	// 	// 30 days
+		res.cookie('refresh_token', RefreshToken, { maxAge: refresh.COOKIE_REFRESH.maxAge})
 		// 15 min
-		res.cookie('access_token', AccessToken, { maxAge: refresh.COOKIE_ACCESS.maxAge, path: '/' })
+		res.cookie('access_token', AccessToken, { maxAge: refresh.COOKIE_ACCESS.maxAge})
 
 		return res.sendFile('/home/ubuntu/DiscordWeb/callback.html');
 		// res.send(JSON.stringify([{ body: req.body }, { header: req.headers }]))
@@ -188,21 +199,23 @@ app.get('/api/users/@me', async (req, res) => {
 	// TODO: Cache
 	const User = await database.GetUserDetails((req as any).user_id)
 
-	if (User[1]) {
-		const a = User[1]
-		// refresh auth token
-		const DiscordResponse = await RefreshDiscordToken(User[1] as any)
-		database.AddDiscordAuth((req as any).user_id, DiscordResponse);
+	// console.log(User)
 
-		const { RefreshToken, AccessToken } = createTokens((req as any).user_id, DiscordResponse.expires_in, Date.now(), DiscordResponse.refresh_token)
+	// if (User[1]) {
+	// 	const a = User[1]
+	// 	// refresh auth token
+	// 	const DiscordResponse = await RefreshDiscordToken(User[1] as any)
+	// 	database.AddDiscordAuth((req as any).user_id, DiscordResponse);
 
-		// 30 days
-		res.cookie('refresh_token', RefreshToken, { maxAge: refresh.COOKIE_REFRESH.maxAge, path: '/' })
-		// 15 min
-		res.cookie('access_token', AccessToken, { maxAge: refresh.COOKIE_ACCESS.maxAge, path: '/' })
-	}
+	// 	const { RefreshToken, AccessToken } = createTokens((req as any).user_id, DiscordResponse.expires_in, Date.now(), DiscordResponse.refresh_token)
 
-	res.json(User[0])
+	// 	// 30 days
+	// 	res.cookie('refresh_token', RefreshToken, { maxAge: refresh.COOKIE_REFRESH.maxAge, path: '/' })
+	// 	// 15 min
+	// 	res.cookie('access_token', AccessToken, { maxAge: refresh.COOKIE_ACCESS.maxAge, path: '/' })
+	// }
+
+	res.json(User)
 })
 
 app.post('/api/guilds/@channels', jsonParser, async (req, res) => {
@@ -228,7 +241,7 @@ app.get('/interactions', async function (req, res) {
 	return;
 })
 
-app.post('/interactions', async function (req, res) {
+app.post('/api/interactions', async function (req, res) {
 	console.log('POST interactions')
 	const PUBLIC_KEY = '04458190ee3ca7879627465b97ae4527d627a31f83de1635881bf71aa1a63a0e';
 
@@ -252,14 +265,35 @@ app.post('/interactions', async function (req, res) {
 			res.end(JSON.stringify({type: 1}))
 		} else {
 			// TODO: Handle all types
-			console.log(JSON.stringify(req.body))
-			return res.json({
-				"type": 4,
-				"data": {
-					"tts": false,
-					"content": "https://discord.patrykstyla.com"
-				}
-			})
+			if (req.body.data.name === "add") {
+				const interactionAdd = req.body as Interaction<InteractionOptionsAdd>
+
+				AddMusicViaYTLink([
+					interactionAdd.data.options[0].value,
+					interactionAdd.data.options[1].value,
+					interactionAdd.data.options[2].value
+				] , interactionAdd.member.user.id
+				, res);
+
+				return res.json({
+					"type": 4,
+					"data": {
+						"tts": false,
+						"content": "Ok Piss"
+					}
+				})
+
+			} else {
+				// Unkown (or misspelled) interaction
+				return res.json({
+					"type": 4,
+					"data": {
+						"tts": false,
+						"content": "https://discord.patrykstyla.com"
+					}
+				})
+			}
+
 		}
 	}
 })
@@ -277,6 +311,50 @@ app.get('*', async function (req, res) {
 httpServer.listen(3000, 'localhost', () => {
 	console.log("hey")
 });
+
+interface Interaction<T> {
+	application_id: string,
+	channel_id: string,
+	data: InteractionData<T>,
+	guild_id: string,
+	id: string,
+	member: member,
+	token: string,
+	type: number,
+	version: number
+}
+
+interface member {
+	deaf: boolean,
+	is_pending: boolean,
+	joined: string,
+	mute: boolean,
+	nick: string | null,
+	permissions: string,
+	premium_since: string | null,
+	roles: string[],
+	user: user,
+}
+
+interface user {
+	avatar: string,
+	discriminator: string,
+	id: string,
+	public_flags: string,
+	username: string
+}
+
+interface InteractionData<T> {
+	id: string,
+	name: string,
+	options: T[]
+}
+
+interface InteractionOptionsAdd{
+	name: string,
+	type: string,
+	value: string
+}
 
 export interface DiscordResponse {
 	access_token: string,
@@ -321,4 +399,103 @@ export interface JWTTokens {
 	exp: number,
 	refresh_token: string
 
+}
+
+function AddMusicViaYTLink(args: string[], user_id: string, res: any) {
+	let command = args.shift();
+
+	if (!command) {
+		// msg.reply("No url");
+		return res.status(401).json({
+			"type": 4,
+			"data": {
+				"tts": false,
+				"content": "no url"
+			}
+		})
+	}
+	// [0] for the full url
+	const matches = command.match(/^(https?\:\/\/)?((www\.)?youtube\.com|youtu\.?be)\/.+$/);
+
+	if (!matches) {
+		return res.status(401).json({
+			"type": 4,
+			"data": {
+				"tts": false,
+				"content": "Not a youtube url"
+			}
+		})
+	}
+	let start = convert(args[0]);
+	let finish = convert(args[1]);
+
+	if (finish - start > 20) {
+		// No timestamps provided
+		return res.status(401).json({
+			"type": 4,
+			"data": {
+				"tts": false,
+				"content": "Max 20 seconds"
+			}
+		})
+	}
+
+	// Unique? id for temp audio file
+	const date = Date.now() * Math.floor(Math.random() * 100000);
+	ydtl(matches[0], { filter: 'audioonly', quality: 'highestaudio' }).pipe(fs.createWriteStream(BossMusicFilePath + date)).on('finish', () => {
+		// Process file with ffmpeg
+		ConvertFFmpeg(BossMusicFilePath + date, user_id, date.toString(), start, finish);
+	});
+}
+
+function convert(input: string) {
+	// if length 0 index [0] is < 60 secs
+	// if length 1 index [0] is < 60 min and index [1] is < 60 secs
+	// if length 3 index [0] is < 60 hours, index [1] is < 60 min and index [2] is < 60 secs
+	var a = input.split(':'); // split it at the colons
+	let seconds = 0; 
+
+	if (a.length === 1) {
+		let b = parseInt(a[0])
+		seconds = b;
+	} else if (a.length === 2) {
+		let b = parseInt(a[0])
+		let bb = parseInt(a[1])
+		seconds = (b * 60) + bb
+	} else {
+		let b = parseInt(a[0])
+		let bb = parseInt(a[1])
+		let bbb = parseInt(a[2])
+		seconds = ((b * 60 * 60) + (bb * 60)) + bbb
+	}
+
+	return seconds
+}
+
+function ConvertFFmpeg(dest: string, user_id: string, fileName: string, start: number = 0, end: number = 0) {
+	let command = FfmpegCommand(dest);
+	command.on('start', (a) => {
+		console.log(a);
+	})
+	.inputOptions([`-ss ${start}`, `-to ${end}`])
+	// the other functions set the output options and it wont work otherwise
+	.outputOptions(['-c:a libopus', '-b:a 96k'])
+	.on('start', function (commandLine) {
+		console.log('Spawned Ffmpeg with command: ' + commandLine);
+	})
+	.on('end', function () {
+		// Done with the temporary file remove.
+		fs.unlink(dest, (err) => {
+			if (err) {
+				console.error(err);
+				return;
+			}
+		});
+		// TODO: Remove/Store/Limit/Update previous boss musics
+		database.UpdateUserBossMusic(user_id, fileName);
+	})
+	.on('error', function (err) {
+		console.log('an error happened: ' + err);
+	})
+	.saveToFile(dest + '.ogg');
 }
